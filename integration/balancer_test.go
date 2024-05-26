@@ -26,8 +26,6 @@ func TestBalancer(t *testing.T) {
 	requestCount := 100
 
 	for i := 0; i < requestCount; i++ {
-		requestCount++
-
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -63,7 +61,7 @@ func BenchmarkBalancer(b *testing.B) {
 		b.Skip("Integration benchmark is not enabled")
 	}
 
-	reqCount := 100
+	reqCount := 1000
 	start := time.Now()
 
 	for n := 0; n < reqCount; n++ {
