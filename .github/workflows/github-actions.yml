@@ -14,12 +14,6 @@ jobs:
             - name: Checkout
               uses: actions/checkout@v4
 
-            - name: Update
-              run: |
-                  go get -u ./...
-                  go mod download
-                  go mod tidy
-
             - name: Go
               uses: actions/setup-go@v4
               with:
