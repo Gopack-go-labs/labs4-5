@@ -14,19 +14,19 @@ func TestDb_Put(t *testing.T) {
 	}
 	defer os.RemoveAll(dir)
 
-	db, err := NewDb(dir)
+	db, err := NewDb(dir, 10*Megabyte)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
 
-	pairs := [][]string {
+	pairs := [][]string{
 		{"key1", "value1"},
 		{"key2", "value2"},
 		{"key3", "value3"},
 	}
 
-	outFile, err := os.Open(filepath.Join(dir, outFileName))
+	outFile := db.curSegment.file
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestDb_Put(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if size1 * 2 != outInfo.Size() {
+		if size1*2 != outInfo.Size() {
 			t.Errorf("Unexpected size (%d vs %d)", size1, outInfo.Size())
 		}
 	})
@@ -73,7 +73,7 @@ func TestDb_Put(t *testing.T) {
 		if err := db.Close(); err != nil {
 			t.Fatal(err)
 		}
-		db, err = NewDb(dir)
+		db, err = NewDb(dir, 10*Megabyte)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -89,4 +89,62 @@ func TestDb_Put(t *testing.T) {
 		}
 	})
 
+}
+
+func TestDb_Segments(t *testing.T) {
+	dbDir := filepath.Join(os.TempDir(), "test-db")
+	if err := os.MkdirAll(dbDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dbDir)
+
+	db, err := NewDb(dbDir, 18*3*Byte)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	pairs := [][]string{
+		{"key1", "value1"}, // key1 - 4bytes, value1 - 6bytes, size meter - 4bytes = 18bytes
+		{"key2", "value2"},
+		{"key3", "value3"},
+	}
+
+	t.Run("segmentation", func(t *testing.T) {
+		for _, pair := range pairs {
+			err := db.Put(pair[0], pair[1])
+			if err != nil {
+				t.Errorf("Cannot put %s: %s", pairs[0], err)
+			}
+		}
+		if len(db.segments) != 1 {
+			t.Errorf("Expected number of segments %d got %d", 1, len(db.segments))
+		}
+	})
+
+	t.Run("new segment", func(t *testing.T) {
+		for _, pair := range pairs {
+			err := db.Put(pair[0], pair[1])
+			if err != nil {
+				t.Errorf("Cannot put %s: %s", pairs[0], err)
+			}
+		}
+		if len(db.segments) != 2 {
+			t.Errorf("Expected number of segments %d got %d", 2, len(db.segments))
+		}
+	})
+
+	t.Run("new db process", func(t *testing.T) {
+		if err := db.Close(); err != nil {
+			t.Fatal(err)
+		}
+		db, err = NewDb(dbDir, 18*3*Byte)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if len(db.segments) != 2 {
+			t.Errorf("Expected number of segments %d got %d", 2, len(db.segments))
+		}
+	})
 }
