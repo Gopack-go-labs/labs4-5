@@ -24,6 +24,10 @@ type Db struct {
 }
 
 func NewDb(dir string, size MemoryUnit) (*Db, error) {
+	err := os.MkdirAll(dir, 0o755)
+	if err != nil {
+		return nil, err
+	}
 	db := &Db{
 		outDir:         dir,
 		index:          make(hashIndex),
@@ -69,6 +73,7 @@ func (db *Db) recoverSegment(id int, path string) error {
 	segment := &Segment{
 		offset: 0,
 		file:   input,
+		id:     id,
 	}
 	db.segments[id] = segment
 

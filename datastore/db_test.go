@@ -93,12 +93,9 @@ func TestDb_Put(t *testing.T) {
 
 func TestDb_Segments(t *testing.T) {
 	dbDir := filepath.Join(os.TempDir(), "test-db")
-	if err := os.MkdirAll(dbDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
+	db, err := NewDb(dbDir, 18*3*Byte)
 	defer os.RemoveAll(dbDir)
 
-	db, err := NewDb(dbDir, 18*3*Byte)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,13 +121,23 @@ func TestDb_Segments(t *testing.T) {
 
 	t.Run("new segment", func(t *testing.T) {
 		for _, pair := range pairs {
-			err := db.Put(pair[0], pair[1])
+			err := db.Put(pair[0], pair[1]+"new")
 			if err != nil {
 				t.Errorf("Cannot put %s: %s", pairs[0], err)
 			}
 		}
 		if len(db.segments) != 2 {
 			t.Errorf("Expected number of segments %d got %d", 2, len(db.segments))
+		}
+
+		for _, pair := range pairs {
+			value, err := db.Get(pair[0])
+			if err != nil {
+				t.Errorf("Cannot get %s: %s", pairs[0], err)
+			}
+			if value != pair[1]+"new" {
+				t.Errorf("Bad value returned expected %s, got %s", pair[1]+"new", value)
+			}
 		}
 	})
 
