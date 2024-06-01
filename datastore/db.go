@@ -11,13 +11,11 @@ import (
 
 var ErrNotFound = fmt.Errorf("record does not exist")
 
-type hashIndex map[string]*Record
-
 type Db struct {
 	maxSegmentSize MemoryUnit
 	outDir         string
 
-	index      hashIndex
+	index      *ConcurrentMap[string, *Record]
 	segments   map[int]*Segment
 	curSegment *Segment
 
@@ -37,7 +35,7 @@ func NewDb(dir string, size MemoryUnit) (*Db, error) {
 	}
 	db := &Db{
 		outDir:         dir,
-		index:          make(hashIndex),
+		index:          ConcurrentMapInit[string, *Record](),
 		segments:       make(map[int]*Segment),
 		maxSegmentSize: size,
 		dataChan:       make(chan PutRequest),
@@ -99,10 +97,10 @@ func (db *Db) recoverSegment(id int, path string) error {
 			return pair.err
 		}
 		e := pair.entry
-		db.index[e.key] = &Record{
+		db.index.Set(e.key, &Record{
 			position: segment.offset,
 			segment:  segment,
-		}
+		})
 		segment.offset += e.Size().Bytes()
 	}
 
@@ -115,11 +113,11 @@ func (db *Db) Close() error {
 }
 
 func (db *Db) Get(key string) (val string, err error) {
-	record, ok := db.index[key]
+	record, ok := db.index.Get(key)
 	if !ok {
 		return "", ErrNotFound
 	}
-	val, err = record.Get()
+	val, err = record.Get() // This is thread-safe as the record is immutable
 
 	return
 }
@@ -153,7 +151,7 @@ func (db *Db) put(e *entry) error {
 	record, err := db.curSegment.Write(e)
 
 	if err == nil {
-		db.index[e.key] = record
+		db.index.Set(e.key, record)
 	}
 	return err
 }
@@ -195,9 +193,9 @@ func (db *Db) mergeOldSegments() error {
 	}
 
 	for key := range vals {
-		record := db.index[key]
+		record, _ := db.index.Get(key)
 		if wasUpdatedAfterMerge := record.segment.id > segments[len(segments)-1].id; !wasUpdatedAfterMerge {
-			db.index[key] = shadowDb.index[key]
+			db.index.ReplaceOwn(key, shadowDb.index)
 		}
 	}
 
