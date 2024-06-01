@@ -15,9 +15,10 @@ type Db struct {
 	maxSegmentSize MemoryUnit
 	outDir         string
 
-	index      *ConcurrentMap[string, *Record]
-	segments   map[int]*Segment
-	curSegment *Segment
+	index                 *ConcurrentMap[string, *Record]
+	segments              map[int]*Segment
+	curSegment            *Segment
+	segmentMergeThreshold int
 
 	dataChan chan PutRequest
 	open     bool
@@ -34,12 +35,13 @@ func NewDb(dir string, size MemoryUnit) (*Db, error) {
 		return nil, err
 	}
 	db := &Db{
-		outDir:         dir,
-		index:          ConcurrentMapInit[string, *Record](),
-		segments:       make(map[int]*Segment),
-		maxSegmentSize: size,
-		dataChan:       make(chan PutRequest),
-		open:           true,
+		outDir:                dir,
+		index:                 ConcurrentMapInit[string, *Record](),
+		segments:              make(map[int]*Segment),
+		maxSegmentSize:        size,
+		dataChan:              make(chan PutRequest),
+		open:                  true,
+		segmentMergeThreshold: 10,
 	}
 
 	go db.handleWriteLoop()
@@ -97,7 +99,7 @@ func (db *Db) recoverSegment(id int, path string) error {
 			return pair.err
 		}
 		e := pair.entry
-		db.index.Set(e.key, &Record{
+		db.index.SetUnsafe(e.key, &Record{
 			position: segment.offset,
 			segment:  segment,
 		})
@@ -151,7 +153,7 @@ func (db *Db) put(e *entry) error {
 	record, err := db.curSegment.Write(e)
 
 	if err == nil {
-		db.index.Set(e.key, record)
+		db.index.SetUnsafe(e.key, record)
 	}
 	return err
 }
@@ -174,6 +176,12 @@ func (db *Db) mergeOldSegments() error {
 			if pair.err != nil {
 				return pair.err
 			}
+
+			record, _ := db.index.Get(pair.entry.key)
+			if inNewerSegment := record.segment.id == db.curSegment.id; inNewerSegment {
+				continue
+			}
+
 			e := pair.entry
 			vals[e.key] = e.value
 		}
@@ -193,18 +201,12 @@ func (db *Db) mergeOldSegments() error {
 	}
 
 	for key := range vals {
-		record, _ := db.index.Get(key)
-		if wasUpdatedAfterMerge := record.segment.id > segments[len(segments)-1].id; !wasUpdatedAfterMerge {
-			db.index.ReplaceOwn(key, shadowDb.index)
-		}
+		db.index.ReplaceOwn(key, shadowDb.index)
 	}
 
 	for _, segment := range segments {
 		toRemove := db.segments[segment.id]
-		err := os.Remove(toRemove.file.Name())
-		if err != nil {
-			panic("Fatal error during db merge, data loss possible: " + err.Error())
-		}
+		os.Remove(toRemove.file.Name())
 		delete(db.segments, segment.id)
 	}
 
@@ -223,6 +225,7 @@ func (db *Db) initNewSegment() error {
 	oldId := -1
 	if db.curSegment != nil {
 		oldId = db.curSegment.id
+		defer db.curSegment.Close()
 	}
 
 	newSegmentId := oldId + 1
@@ -230,27 +233,29 @@ func (db *Db) initNewSegment() error {
 	if err != nil {
 		return err
 	}
-	db.segments[newSegmentId] = &Segment{
+
+	newSegment := &Segment{
 		offset: 0,
 		file:   outFile,
 		id:     newSegmentId,
 	}
+	db.segments[newSegmentId] = newSegment
+	db.curSegment = newSegment
 
-	if db.curSegment != nil {
-		err = db.curSegment.Close()
-		if err != nil {
-			return err
-		}
+	if len(db.segments) > db.segmentMergeThreshold {
+		db.mergeOldSegments()
 	}
 
-	db.curSegment = db.segments[newSegmentId]
 	return nil
 }
 
 func (db *Db) handleWriteLoop() {
 	for db.open {
 		data := <-db.dataChan
+		l := db.index.l
+		l.Lock()
 		err := db.put(data.entry)
+		l.Unlock()
 		data.res <- err
 	}
 }

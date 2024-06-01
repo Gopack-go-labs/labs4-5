@@ -14,15 +14,15 @@ func ConcurrentMapInit[K comparable, V any]() *ConcurrentMap[K, V] {
 	}
 }
 
-func (cm *ConcurrentMap[K, V]) Set(key K, value V) {
-	cm.l.Lock()
-	defer cm.l.Unlock()
+func (cm *ConcurrentMap[K, V]) SetUnsafe(key K, value V) {
 	cm.m[key] = value
 }
 
 func (cm *ConcurrentMap[K, V]) ReplaceOwn(key K, o *ConcurrentMap[K, V]) {
 	val, _ := o.Get(key)
-	cm.Set(key, val)
+	cm.l.Lock()
+	defer cm.l.Unlock()
+	cm.SetUnsafe(key, val)
 }
 
 func (cm *ConcurrentMap[K, V]) Get(key K) (V, bool) {
