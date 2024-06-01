@@ -12,71 +12,14 @@ import (
 
 var ErrNotFound = fmt.Errorf("record does not exist")
 
-type Record struct {
-	position int64
-	segment  *Segment
-}
-
 type hashIndex map[string]*Record
-
-type Segment struct {
-	offset int64
-	file   *os.File
-	id     int
-}
-
-func (s *Segment) Close() error {
-	return s.file.Close()
-}
-
-func (s *Segment) Write(p *entry) (*Record, error) {
-	n, err := s.file.Write(p.Encode())
-	if err != nil {
-		return nil, err
-	}
-	record := &Record{
-		segment:  s,
-		position: s.offset,
-	}
-	s.offset += int64(n)
-	return record, nil
-}
-
-func (s *Segment) Get(record *Record) (string, error) {
-	file, err := os.Open(s.file.Name())
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
-
-	_, err = file.Seek(record.position, 0)
-	if err != nil {
-		return "", err
-	}
-
-	reader := bufio.NewReader(file)
-	value, err := readValue(reader)
-	if err != nil {
-		return "", err
-	}
-
-	return value, nil
-}
-
-func (s *Segment) IsSurpassed(maxSize MemoryUnit) bool {
-	return s.offset > maxSize.Bytes()
-}
-
-func (s *Segment) FilePath() string {
-	return s.file.Name()
-}
 
 type Db struct {
 	maxSegmentSize MemoryUnit
 	outDir         string
 
 	index      hashIndex
-	segments   map[int]*Segment // TODO: take a look if can be easily done with a slice
+	segments   map[int]*Segment
 	curSegment *Segment
 }
 
@@ -118,7 +61,6 @@ func NewDb(dir string, size MemoryUnit) (*Db, error) {
 
 const bufSize = 8192
 
-// TODO: use initNewSegment
 func (db *Db) recoverSegment(id int, path string) error {
 	input, err := os.Open(path)
 	if err != nil {
