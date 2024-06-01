@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 )
@@ -154,6 +155,105 @@ func (db *Db) Put(key, value string) error {
 		db.index[key] = record
 	}
 	return err
+}
+
+func (db *Db) mergeOldSegments() error {
+	segments := make([]*Segment, 0, len(db.segments))
+	for _, segment := range db.segments {
+		if segment != db.curSegment {
+			segments = append(segments, segment)
+		}
+	}
+	sort.Slice(segments, func(i, j int) bool {
+		return segments[i].id < segments[j].id
+	})
+
+	var err error
+	vals := make(map[string]string)
+	var buf [bufSize]byte
+	for _, seg := range segments {
+		offset := 0
+		reopen, err := os.Open(seg.file.Name())
+		if err != nil {
+			return err
+		}
+		in := bufio.NewReaderSize(reopen, bufSize)
+
+		// TODO: make file iterator
+		for err == nil {
+			var (
+				header, data []byte
+				n            int
+			)
+			header, err = in.Peek(bufSize)
+			if err == io.EOF {
+				if len(header) == 0 {
+					break
+				}
+			} else if err != nil {
+				return err
+			}
+			size := binary.LittleEndian.Uint32(header)
+
+			if size < bufSize {
+				data = buf[:size]
+			} else {
+				data = make([]byte, size)
+			}
+			n, err = in.Read(data)
+
+			if err == nil {
+				if n != int(size) {
+					return fmt.Errorf("corrupted file")
+				}
+
+				var e entry
+				e.Decode(data)
+
+				vals[e.key] = e.value
+				offset += n
+			}
+		}
+	}
+
+	shadowDb, err := NewDb(path.Join(db.outDir, "shadow"), db.maxSegmentSize)
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(shadowDb.outDir)
+
+	for key, value := range vals {
+		err = shadowDb.Put(key, value)
+		if err != nil {
+			return err
+		}
+	}
+
+	for key := range vals {
+		record := db.index[key]
+		if wasUpdatedAfterMerge := record.segment.id > segments[len(segments)-1].id; !wasUpdatedAfterMerge {
+			db.index[key] = shadowDb.index[key]
+		}
+	}
+
+	for _, segment := range segments {
+		toRemove := db.segments[segment.id]
+		err := os.Remove(toRemove.file.Name())
+		if err != nil {
+			panic("Fatal error during db merge, data loss possible: " + err.Error())
+		}
+		delete(db.segments, segment.id)
+	}
+
+	for _, segment := range shadowDb.segments {
+		err = os.Rename(segment.file.Name(), path.Join(db.outDir, path.Base(segment.file.Name())))
+		if err != nil {
+			panic("Fatal error during db merge: " + err.Error())
+		}
+		db.segments[segment.id] = segment
+	}
+
+	return nil
 }
 
 func (db *Db) initNewSegment() error {
