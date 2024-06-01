@@ -1,8 +1,6 @@
 package datastore
 
 import (
-	"bufio"
-	"encoding/binary"
 	"fmt"
 	"io"
 	"os"
@@ -35,7 +33,13 @@ func NewDb(dir string, size MemoryUnit) (*Db, error) {
 		segments:       make(map[int]*Segment),
 		maxSegmentSize: size,
 	}
-	files, err := filepath.Glob(filepath.Join(dir, "segment-*"))
+	return db.recover()
+}
+
+const bufSize = 8192
+
+func (db *Db) recover() (*Db, error) {
+	files, err := filepath.Glob(filepath.Join(db.outDir, "segment-*"))
 	if len(files) == 0 {
 		err = db.initNewSegment()
 		if err != nil {
@@ -61,10 +65,9 @@ func NewDb(dir string, size MemoryUnit) (*Db, error) {
 			}
 		}
 	}
+
 	return db, nil
 }
-
-const bufSize = 8192
 
 func (db *Db) recoverSegment(id int, path string) error {
 	input, err := os.Open(path)
@@ -78,44 +81,18 @@ func (db *Db) recoverSegment(id int, path string) error {
 	}
 	db.segments[id] = segment
 
-	var buf [bufSize]byte
-	in := bufio.NewReaderSize(input, bufSize)
-	for err == nil {
-		var (
-			header, data []byte
-			n            int
-		)
-		header, err = in.Peek(bufSize)
-		if err == io.EOF {
-			if len(header) == 0 {
-				return err
-			}
-		} else if err != nil {
-			return err
+	for pair := range segmentValsGenerator(segment) {
+		if pair.err != nil {
+			return pair.err
 		}
-		size := binary.LittleEndian.Uint32(header)
-
-		if size < bufSize {
-			data = buf[:size]
-		} else {
-			data = make([]byte, size)
+		e := pair.entry
+		db.index[e.key] = &Record{
+			position: segment.offset,
+			segment:  segment,
 		}
-		n, err = in.Read(data)
-
-		if err == nil {
-			if n != int(size) {
-				return fmt.Errorf("corrupted file")
-			}
-
-			var e entry
-			e.Decode(data)
-			db.index[e.key] = &Record{
-				position: segment.offset,
-				segment:  segment,
-			}
-			segment.offset += int64(n)
-		}
+		segment.offset += e.Size().Bytes()
 	}
+
 	return err
 }
 
@@ -170,49 +147,13 @@ func (db *Db) mergeOldSegments() error {
 
 	var err error
 	vals := make(map[string]string)
-	var buf [bufSize]byte
 	for _, seg := range segments {
-		offset := 0
-		reopen, err := os.Open(seg.file.Name())
-		if err != nil {
-			return err
-		}
-		in := bufio.NewReaderSize(reopen, bufSize)
-
-		// TODO: make file iterator
-		for err == nil {
-			var (
-				header, data []byte
-				n            int
-			)
-			header, err = in.Peek(bufSize)
-			if err == io.EOF {
-				if len(header) == 0 {
-					break
-				}
-			} else if err != nil {
-				return err
+		for pair := range segmentValsGenerator(seg) {
+			if pair.err != nil {
+				return pair.err
 			}
-			size := binary.LittleEndian.Uint32(header)
-
-			if size < bufSize {
-				data = buf[:size]
-			} else {
-				data = make([]byte, size)
-			}
-			n, err = in.Read(data)
-
-			if err == nil {
-				if n != int(size) {
-					return fmt.Errorf("corrupted file")
-				}
-
-				var e entry
-				e.Decode(data)
-
-				vals[e.key] = e.value
-				offset += n
-			}
+			e := pair.entry
+			vals[e.key] = e.value
 		}
 	}
 
@@ -248,7 +189,7 @@ func (db *Db) mergeOldSegments() error {
 	for _, segment := range shadowDb.segments {
 		err = os.Rename(segment.file.Name(), path.Join(db.outDir, path.Base(segment.file.Name())))
 		if err != nil {
-			panic("Fatal error during db merge: " + err.Error())
+			panic("Fatal error during db merge, data loss possible: " + err.Error())
 		}
 		db.segments[segment.id] = segment
 	}
