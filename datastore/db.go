@@ -20,6 +20,14 @@ type Db struct {
 	index      hashIndex
 	segments   map[int]*Segment
 	curSegment *Segment
+
+	dataChan chan PutRequest
+	open     bool
+}
+
+type PutRequest struct {
+	entry *entry
+	res   chan error
 }
 
 func NewDb(dir string, size MemoryUnit) (*Db, error) {
@@ -32,7 +40,12 @@ func NewDb(dir string, size MemoryUnit) (*Db, error) {
 		index:          make(hashIndex),
 		segments:       make(map[int]*Segment),
 		maxSegmentSize: size,
+		dataChan:       make(chan PutRequest),
+		open:           true,
 	}
+
+	go db.handleWriteLoop()
+
 	return db.recover()
 }
 
@@ -97,6 +110,7 @@ func (db *Db) recoverSegment(id int, path string) error {
 }
 
 func (db *Db) Close() error {
+	db.open = false
 	return db.curSegment.Close()
 }
 
@@ -111,10 +125,20 @@ func (db *Db) Get(key string) (val string, err error) {
 }
 
 func (db *Db) Put(key, value string) error {
-	e := &entry{
-		key:   key,
-		value: value,
+	res := make(chan error)
+	db.dataChan <- PutRequest{
+		entry: &entry{
+			key:   key,
+			value: value,
+		},
+		res: res,
 	}
+	err := <-res
+	close(res)
+	return err
+}
+
+func (db *Db) put(e *entry) error {
 	entrySize := e.Size()
 	if db.maxSegmentSize < entrySize {
 		return fmt.Errorf("entry size exceeds segment size")
@@ -129,7 +153,7 @@ func (db *Db) Put(key, value string) error {
 	record, err := db.curSegment.Write(e)
 
 	if err == nil {
-		db.index[key] = record
+		db.index[e.key] = record
 	}
 	return err
 }
@@ -223,4 +247,12 @@ func (db *Db) initNewSegment() error {
 
 	db.curSegment = db.segments[newSegmentId]
 	return nil
+}
+
+func (db *Db) handleWriteLoop() {
+	for db.open {
+		data := <-db.dataChan
+		err := db.put(data.entry)
+		data.res <- err
+	}
 }
