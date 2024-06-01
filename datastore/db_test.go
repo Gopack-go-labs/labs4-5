@@ -111,7 +111,7 @@ func TestDb_Segments(t *testing.T) {
 
 	newPairs := [][]string{
 		{"key1", "value1new"}, // 12 + 4 (key1) + 9 (value1new) -> 25
-		{"key2", "value2new"},
+		{"key2", "new"},       // Needs to be 19 in order to fit in the segment after merge (66 - (22 + 25) = 19)
 		{"key4", "value4new"},
 	}
 
@@ -200,7 +200,7 @@ func TestDb_Segments(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if len(db.segments) != 3 { // The size after merge is not enough to remvoe the segment
+		if len(db.segments) != 2 { // The size after merge is not enough to remvoe the segment
 			t.Errorf("Expected number of segments %d got %d", 2, len(db.segments))
 		}
 
