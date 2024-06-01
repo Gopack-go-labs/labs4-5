@@ -105,7 +105,7 @@ func TestDb_Segments(t *testing.T) {
 	defer db.Close()
 
 	pairs := [][]string{
-		{"key1", "value1"}, // key1 - 4bytes, value1 - 6bytes, size meter - 4bytes = 18bytes
+		{"key1", "value1"}, //12 + 4 (key1) + 6 (value1) -> 22
 		{"key2", "value2"},
 		{"key3", "value3"},
 	}
