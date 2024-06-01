@@ -23,6 +23,11 @@ func (e *entry) Encode() []byte {
 	return res
 }
 
+func (e *entry) Size() MemoryUnit {
+	bytes := len(e.key) + len(e.value) + 12
+	return MemoryUnit(bytes * 8)
+}
+
 func (e *entry) Decode(input []byte) {
 	kl := binary.LittleEndian.Uint32(input[4:])
 	keyBuf := make([]byte, kl)

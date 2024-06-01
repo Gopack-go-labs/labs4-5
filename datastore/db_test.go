@@ -93,7 +93,8 @@ func TestDb_Put(t *testing.T) {
 
 func TestDb_Segments(t *testing.T) {
 	dbDir := filepath.Join(os.TempDir(), "test-db")
-	db, err := NewDb(dbDir, 18*3*Byte)
+	limit := 22 * 3 * Byte
+	db, err := NewDb(dbDir, limit)
 	defer os.RemoveAll(dbDir)
 
 	if err != nil {
@@ -108,7 +109,7 @@ func TestDb_Segments(t *testing.T) {
 	}
 
 	newPairs := [][]string{
-		{"key1", "value1new"},
+		{"key1", "value1new"}, // 12 + 4 (key1) + 9 (value1new) -> 25
 		{"key2", "value2new"},
 		{"key4", "value3new"},
 	}
@@ -132,7 +133,7 @@ func TestDb_Segments(t *testing.T) {
 				t.Errorf("Cannot put %s: %s", pair, err)
 			}
 		}
-		if len(db.segments) != 2 {
+		if len(db.segments) != 3 {
 			t.Errorf("Expected number of segments %d got %d", 2, len(db.segments))
 		}
 
@@ -159,12 +160,12 @@ func TestDb_Segments(t *testing.T) {
 		if err := db.Close(); err != nil {
 			t.Fatal(err)
 		}
-		db, err = NewDb(dbDir, 18*3*Byte)
+		db, err = NewDb(dbDir, limit)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		if len(db.segments) != 2 {
+		if len(db.segments) != 3 {
 			t.Errorf("Expected number of segments %d got %d", 2, len(db.segments))
 		}
 
@@ -176,6 +177,13 @@ func TestDb_Segments(t *testing.T) {
 			if value != pair[1] {
 				t.Errorf("Bad value returned expected %s, got %s", pair[1], value)
 			}
+		}
+	})
+
+	t.Run("over limit", func(t *testing.T) {
+		err := db.Put("key5", string(make([]byte, limit+1)))
+		if err == nil {
+			t.Errorf("Expected error, got nil")
 		}
 	})
 }

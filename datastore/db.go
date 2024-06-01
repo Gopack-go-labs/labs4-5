@@ -133,17 +133,22 @@ func (db *Db) Get(key string) (val string, err error) {
 }
 
 func (db *Db) Put(key, value string) error {
-	if db.curSegment.IsSurpassed(db.maxSegmentSize) {
+	e := &entry{
+		key:   key,
+		value: value,
+	}
+	entrySize := e.Size()
+	if db.maxSegmentSize < entrySize {
+		return fmt.Errorf("entry size exceeds segment size")
+	}
+	if db.curSegment.IsSurpassed(db.maxSegmentSize - entrySize) {
 		err := db.initNewSegment()
 		if err != nil {
 			return err
 		}
 	}
 
-	record, err := db.curSegment.Write(&entry{
-		key:   key,
-		value: value,
-	})
+	record, err := db.curSegment.Write(e)
 
 	if err == nil {
 		db.index[key] = record
