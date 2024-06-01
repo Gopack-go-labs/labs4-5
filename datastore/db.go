@@ -127,7 +127,7 @@ func (db *Db) Get(key string) (val string, err error) {
 	if !ok {
 		return "", ErrNotFound
 	}
-	val, err = db.curSegment.Get(record)
+	val, err = record.Get()
 
 	return
 }

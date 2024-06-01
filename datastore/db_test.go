@@ -107,11 +107,17 @@ func TestDb_Segments(t *testing.T) {
 		{"key3", "value3"},
 	}
 
+	newPairs := [][]string{
+		{"key1", "value1new"},
+		{"key2", "value2new"},
+		{"key4", "value3new"},
+	}
+
 	t.Run("segmentation", func(t *testing.T) {
 		for _, pair := range pairs {
 			err := db.Put(pair[0], pair[1])
 			if err != nil {
-				t.Errorf("Cannot put %s: %s", pairs[0], err)
+				t.Errorf("Cannot put %s: %s", pair, err)
 			}
 		}
 		if len(db.segments) != 1 {
@@ -120,24 +126,32 @@ func TestDb_Segments(t *testing.T) {
 	})
 
 	t.Run("new segment", func(t *testing.T) {
-		for _, pair := range pairs {
-			err := db.Put(pair[0], pair[1]+"new")
+		for _, pair := range newPairs {
+			err := db.Put(pair[0], pair[1])
 			if err != nil {
-				t.Errorf("Cannot put %s: %s", pairs[0], err)
+				t.Errorf("Cannot put %s: %s", pair, err)
 			}
 		}
 		if len(db.segments) != 2 {
 			t.Errorf("Expected number of segments %d got %d", 2, len(db.segments))
 		}
 
-		for _, pair := range pairs {
+		for _, pair := range newPairs {
 			value, err := db.Get(pair[0])
 			if err != nil {
-				t.Errorf("Cannot get %s: %s", pairs[0], err)
+				t.Errorf("Cannot get %s: %s", pair, err)
 			}
-			if value != pair[1]+"new" {
-				t.Errorf("Bad value returned expected %s, got %s", pair[1]+"new", value)
+			if value != pair[1] {
+				t.Errorf("Bad value returned expected %s, got %s", pair[1], value)
 			}
+		}
+
+		val, err := db.Get("key3")
+		if err != nil {
+			t.Errorf("Cannot get key3: %s", err)
+		}
+		if val != "value3" {
+			t.Errorf("Bad value returned expected value3, got %s", val)
 		}
 	})
 
@@ -152,6 +166,16 @@ func TestDb_Segments(t *testing.T) {
 
 		if len(db.segments) != 2 {
 			t.Errorf("Expected number of segments %d got %d", 2, len(db.segments))
+		}
+
+		for _, pair := range newPairs {
+			value, err := db.Get(pair[0])
+			if err != nil {
+				t.Errorf("Cannot get %s: %s", pair, err)
+			}
+			if value != pair[1] {
+				t.Errorf("Bad value returned expected %s, got %s", pair[1], value)
+			}
 		}
 	})
 }

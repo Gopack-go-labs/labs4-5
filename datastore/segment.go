@@ -10,6 +10,10 @@ type Record struct {
 	segment  *Segment
 }
 
+func (r *Record) Get() (string, error) {
+	return r.segment.Get(r)
+}
+
 type Segment struct {
 	offset int64
 	file   *os.File
