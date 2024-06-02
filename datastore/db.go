@@ -15,7 +15,6 @@ type Db struct {
 	outDir         string
 
 	segments              []*Segment
-	curSegment            *Segment
 	segmentMergeThreshold int
 
 	dataChan chan PutRequest
@@ -48,6 +47,13 @@ func NewDb(dir string, size MemoryUnit) (*Db, error) {
 
 const bufSize = 8192
 
+func (db *Db) curSegment() *Segment {
+	if len(db.segments) == 0 {
+		return nil
+	}
+	return db.segments[len(db.segments)-1]
+}
+
 func (db *Db) recover() (*Db, error) {
 	files, err := filepath.Glob(filepath.Join(db.outDir, "segment-*"))
 	if len(files) == 0 {
@@ -68,9 +74,7 @@ func (db *Db) recover() (*Db, error) {
 		}
 
 		db.segments = append(db.segments, seg)
-		if isLastSegment := i == len(files)-1; isLastSegment {
-			db.curSegment = seg
-		} else {
+		if isLastSegment := i == len(files)-1; !isLastSegment {
 			err := db.segments[i].Close()
 			if err != nil {
 				return nil, err
@@ -107,7 +111,7 @@ func (db *Db) recoverSegment(id int, path string) (*Segment, error) {
 
 func (db *Db) Close() error {
 	db.open = false
-	return db.curSegment.Close()
+	return db.curSegment().Close()
 }
 
 func (db *Db) Get(key string) (val string, err error) {
@@ -142,14 +146,14 @@ func (db *Db) put(e *entry) error {
 	if db.maxSegmentSize < entrySize {
 		return fmt.Errorf("entry size exceeds segment size")
 	}
-	if db.curSegment.IsSurpassed(db.maxSegmentSize - entrySize) {
+	if db.curSegment().IsSurpassed(db.maxSegmentSize - entrySize) {
 		err := db.initNewSegment()
 		if err != nil {
 			return err
 		}
 	}
 
-	err := db.curSegment.Write(e)
+	err := db.curSegment().Write(e)
 	return err
 }
 
@@ -218,9 +222,9 @@ func (db *Db) mergeOldSegments() error {
 
 func (db *Db) initNewSegment() error {
 	oldId := -1
-	if db.curSegment != nil {
-		oldId = db.curSegment.id
-		defer db.curSegment.Close()
+	if db.curSegment() != nil {
+		oldId = db.curSegment().id
+		defer db.curSegment().Close()
 	}
 
 	newSegmentId := oldId + 1
@@ -236,7 +240,6 @@ func (db *Db) initNewSegment() error {
 		id:     newSegmentId,
 	}
 	db.segments = append(db.segments, newSegment)
-	db.curSegment = newSegment
 
 	if len(db.segments) > db.segmentMergeThreshold {
 		db.mergeOldSegments()

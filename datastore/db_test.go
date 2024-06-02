@@ -26,7 +26,7 @@ func TestDb_Put(t *testing.T) {
 		{"key3", "value3"},
 	}
 
-	outFile := db.curSegment.file
+	outFile := db.curSegment().file
 	if err != nil {
 		t.Fatal(err)
 	}
