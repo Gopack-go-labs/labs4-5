@@ -4,8 +4,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 )
 
 var ErrNotFound = fmt.Errorf("record does not exist")
@@ -15,6 +18,7 @@ type Db struct {
 	outDir         string
 
 	segments              []*Segment
+	lastSegmentId         int
 	segmentMergeThreshold int
 
 	dataChan chan PutRequest
@@ -68,12 +72,14 @@ func (db *Db) recover() (*Db, error) {
 		return files[i] < files[j]
 	})
 	for i, file := range files {
-		seg, err := db.recoverSegment(i, file)
+		seg, err := db.recoverSegment(file)
 		if err != nil && err != io.EOF {
 			return nil, err
 		}
 
 		db.segments = append(db.segments, seg)
+		db.lastSegmentId = seg.id
+
 		if isLastSegment := i == len(files)-1; !isLastSegment {
 			err := db.segments[i].Close()
 			if err != nil {
@@ -85,7 +91,12 @@ func (db *Db) recover() (*Db, error) {
 	return db, nil
 }
 
-func (db *Db) recoverSegment(id int, path string) (*Segment, error) {
+func (db *Db) recoverSegment(path string) (*Segment, error) {
+	id, err := db.getSegmentId(path)
+	if err != nil {
+		return nil, err
+	}
+
 	input, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -158,65 +169,58 @@ func (db *Db) put(e *entry) error {
 }
 
 func (db *Db) mergeOldSegments() error {
-	//segments := make([]*Segment, 0, len(db.segments))
-	//for _, segment := range db.segments {
-	//	if segment != db.curSegment {
-	//		segments = append(segments, segment)
-	//	}
-	//}
-	//sort.Slice(segments, func(i, j int) bool {
-	//	return segments[i].id < segments[j].id
-	//})
-	//
-	//var err error
-	//vals := make(map[string]string)
-	//for _, seg := range segments {
-	//	for pair := range segmentValsGenerator(seg) {
-	//		if pair.err != nil {
-	//			return pair.err
-	//		}
-	//
-	//		record, _ := db.index.Get(pair.entry.key)
-	//		if inNewerSegment := record.segment.id == db.curSegment.id; inNewerSegment {
-	//			continue
-	//		}
-	//
-	//		e := pair.entry
-	//		vals[e.key] = e.value
-	//	}
-	//}
-	//
-	//shadowDb, err := NewDb(path.Join(db.outDir, "shadow"), db.maxSegmentSize)
-	//if err != nil {
-	//	return err
-	//}
-	//defer os.RemoveAll(shadowDb.outDir)
-	//
-	//for key, value := range vals {
-	//	err = shadowDb.Put(key, value)
-	//	if err != nil {
-	//		return err
-	//	}
-	//}
-	//
-	//for key := range vals {
-	//	db.index.ReplaceOwn(key, shadowDb.index)
-	//}
-	//
-	//for _, segment := range segments {
-	//	toRemove := db.segments[segment.id]
-	//	os.Remove(toRemove.file.Name())
-	//	//delete(db.segments, segment.id)
-	//}
-	//
-	//for _, segment := range shadowDb.segments {
-	//	err = os.Rename(segment.file.Name(), path.Join(db.outDir, path.Base(segment.file.Name())))
-	//	if err != nil {
-	//		panic("Fatal error during db merge, data loss possible: " + err.Error())
-	//	}
-	//	db.segments[segment.id] = segment
-	//}
-	//
+	segmentsToMerge := make([]*Segment, 0, len(db.segments))
+	for i := 0; i < len(db.segments)-1; i++ {
+		seg := db.segments[i]
+		segmentsToMerge = append(segmentsToMerge, seg)
+	}
+
+	var err error
+	vals := make(map[string]string)
+	for i := 0; i < len(segmentsToMerge); i++ {
+		seg := segmentsToMerge[i]
+		for pair := range segmentValsGenerator(seg) {
+			if pair.err != nil {
+				return pair.err
+			}
+
+			if db.curSegment().Has(pair.entry.key) {
+				continue
+			}
+
+			e := pair.entry
+			vals[e.key] = e.value
+		}
+	}
+
+	shadowDb, err := NewDb(path.Join(db.outDir, "shadow"), db.maxSegmentSize)
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(shadowDb.outDir)
+	defer shadowDb.Close()
+
+	for key, value := range vals {
+		err = shadowDb.Put(key, value)
+		if err != nil {
+			return err
+		}
+	}
+
+	for _, mergedSegment := range shadowDb.segments {
+		err = os.Rename(mergedSegment.file.Name(), db.getNextSegmentPath())
+		if err != nil {
+			return err
+		}
+		db.lastSegmentId++
+	}
+
+	db.segments = append(shadowDb.segments, db.curSegment())
+
+	for _, segment := range segmentsToMerge {
+		os.Remove(segment.FilePath())
+	}
+
 	return nil
 }
 
@@ -242,10 +246,15 @@ func (db *Db) initNewSegment() error {
 	db.segments = append(db.segments, newSegment)
 
 	if len(db.segments) > db.segmentMergeThreshold {
-		db.mergeOldSegments()
+		go db.mergeOldSegments()
 	}
 
 	return nil
+}
+
+func (db *Db) getNextSegmentPath() string {
+	id := db.lastSegmentId + 1
+	return filepath.Join(db.outDir, fmt.Sprintf("segment-%d", id))
 }
 
 func (db *Db) handleWriteLoop() {
@@ -254,4 +263,13 @@ func (db *Db) handleWriteLoop() {
 		err := db.put(data.entry)
 		data.res <- err
 	}
+}
+
+func (db *Db) getSegmentId(path string) (int, error) {
+	s := regexp.MustCompile(`segment-(\d+)`).FindStringSubmatch(path)
+	if len(s) == 0 {
+		return 0, fmt.Errorf("cannot parse segment id")
+	}
+
+	return strconv.Atoi(s[1])
 }

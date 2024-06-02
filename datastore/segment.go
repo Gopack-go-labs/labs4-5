@@ -58,6 +58,11 @@ func (s *Segment) Get(key string) (string, error) {
 	return value, nil
 }
 
+func (s *Segment) Has(key string) bool {
+	_, err := s.Get(key)
+	return err == nil
+}
+
 func (s *Segment) IsSurpassed(maxSize MemoryUnit) bool {
 	return s.offset > maxSize.Bytes()
 }
