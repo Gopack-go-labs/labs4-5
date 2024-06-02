@@ -20,6 +20,7 @@ func (r *Record) Get() (string, error) {
 type Segment struct {
 	offset int64
 	file   *os.File
+	index  *ConcurrentMap[string, *Record]
 	id     int
 }
 

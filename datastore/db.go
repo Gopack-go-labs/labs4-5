@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path"
 	"path/filepath"
 	"sort"
 )
@@ -15,7 +14,6 @@ type Db struct {
 	maxSegmentSize MemoryUnit
 	outDir         string
 
-	index                 *ConcurrentMap[string, *Record]
 	segments              []*Segment
 	curSegment            *Segment
 	segmentMergeThreshold int
@@ -36,7 +34,6 @@ func NewDb(dir string, size MemoryUnit) (*Db, error) {
 	}
 	db := &Db{
 		outDir:                dir,
-		index:                 ConcurrentMapInit[string, *Record](),
 		segments:              make([]*Segment, 0),
 		maxSegmentSize:        size,
 		dataChan:              make(chan PutRequest),
@@ -92,6 +89,7 @@ func (db *Db) recoverSegment(id int, path string) (*Segment, error) {
 	segment := &Segment{
 		offset: 0,
 		file:   input,
+		index:  ConcurrentMapInit[string, *Record](),
 		id:     id,
 	}
 
@@ -100,7 +98,7 @@ func (db *Db) recoverSegment(id int, path string) (*Segment, error) {
 			return nil, pair.err
 		}
 		e := pair.entry
-		db.index.SetUnsafe(e.key, &Record{
+		segment.index.SetUnsafe(e.key, &Record{
 			position: segment.offset,
 			segment:  segment,
 		})
@@ -116,13 +114,17 @@ func (db *Db) Close() error {
 }
 
 func (db *Db) Get(key string) (val string, err error) {
-	record, ok := db.index.Get(key)
-	if !ok {
-		return "", ErrNotFound
+	for i := len(db.segments) - 1; i >= 0; i++ {
+		seg := db.segments[i]
+		record, ok := seg.index.Get(key)
+		if !ok {
+			continue
+		}
+		val, err = record.Get() // This is thread-safe as the record is immutable
+		return val, err
 	}
-	val, err = record.Get() // This is thread-safe as the record is immutable
 
-	return
+	return "", ErrNotFound
 }
 
 func (db *Db) Put(key, value string) error {
@@ -154,71 +156,71 @@ func (db *Db) put(e *entry) error {
 	record, err := db.curSegment.Write(e)
 
 	if err == nil {
-		db.index.SetUnsafe(e.key, record)
+		db.curSegment.index.SetUnsafe(e.key, record)
 	}
 	return err
 }
 
 func (db *Db) mergeOldSegments() error {
-	segments := make([]*Segment, 0, len(db.segments))
-	for _, segment := range db.segments {
-		if segment != db.curSegment {
-			segments = append(segments, segment)
-		}
-	}
-	sort.Slice(segments, func(i, j int) bool {
-		return segments[i].id < segments[j].id
-	})
-
-	var err error
-	vals := make(map[string]string)
-	for _, seg := range segments {
-		for pair := range segmentValsGenerator(seg) {
-			if pair.err != nil {
-				return pair.err
-			}
-
-			record, _ := db.index.Get(pair.entry.key)
-			if inNewerSegment := record.segment.id == db.curSegment.id; inNewerSegment {
-				continue
-			}
-
-			e := pair.entry
-			vals[e.key] = e.value
-		}
-	}
-
-	shadowDb, err := NewDb(path.Join(db.outDir, "shadow"), db.maxSegmentSize)
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(shadowDb.outDir)
-
-	for key, value := range vals {
-		err = shadowDb.Put(key, value)
-		if err != nil {
-			return err
-		}
-	}
-
-	for key := range vals {
-		db.index.ReplaceOwn(key, shadowDb.index)
-	}
-
-	for _, segment := range segments {
-		toRemove := db.segments[segment.id]
-		os.Remove(toRemove.file.Name())
-		//delete(db.segments, segment.id)
-	}
-
-	for _, segment := range shadowDb.segments {
-		err = os.Rename(segment.file.Name(), path.Join(db.outDir, path.Base(segment.file.Name())))
-		if err != nil {
-			panic("Fatal error during db merge, data loss possible: " + err.Error())
-		}
-		db.segments[segment.id] = segment
-	}
-
+	//segments := make([]*Segment, 0, len(db.segments))
+	//for _, segment := range db.segments {
+	//	if segment != db.curSegment {
+	//		segments = append(segments, segment)
+	//	}
+	//}
+	//sort.Slice(segments, func(i, j int) bool {
+	//	return segments[i].id < segments[j].id
+	//})
+	//
+	//var err error
+	//vals := make(map[string]string)
+	//for _, seg := range segments {
+	//	for pair := range segmentValsGenerator(seg) {
+	//		if pair.err != nil {
+	//			return pair.err
+	//		}
+	//
+	//		record, _ := db.index.Get(pair.entry.key)
+	//		if inNewerSegment := record.segment.id == db.curSegment.id; inNewerSegment {
+	//			continue
+	//		}
+	//
+	//		e := pair.entry
+	//		vals[e.key] = e.value
+	//	}
+	//}
+	//
+	//shadowDb, err := NewDb(path.Join(db.outDir, "shadow"), db.maxSegmentSize)
+	//if err != nil {
+	//	return err
+	//}
+	//defer os.RemoveAll(shadowDb.outDir)
+	//
+	//for key, value := range vals {
+	//	err = shadowDb.Put(key, value)
+	//	if err != nil {
+	//		return err
+	//	}
+	//}
+	//
+	//for key := range vals {
+	//	db.index.ReplaceOwn(key, shadowDb.index)
+	//}
+	//
+	//for _, segment := range segments {
+	//	toRemove := db.segments[segment.id]
+	//	os.Remove(toRemove.file.Name())
+	//	//delete(db.segments, segment.id)
+	//}
+	//
+	//for _, segment := range shadowDb.segments {
+	//	err = os.Rename(segment.file.Name(), path.Join(db.outDir, path.Base(segment.file.Name())))
+	//	if err != nil {
+	//		panic("Fatal error during db merge, data loss possible: " + err.Error())
+	//	}
+	//	db.segments[segment.id] = segment
+	//}
+	//
 	return nil
 }
 
@@ -238,6 +240,7 @@ func (db *Db) initNewSegment() error {
 	newSegment := &Segment{
 		offset: 0,
 		file:   outFile,
+		index:  ConcurrentMapInit[string, *Record](),
 		id:     newSegmentId,
 	}
 	db.segments = append(db.segments, newSegment)
@@ -253,10 +256,7 @@ func (db *Db) initNewSegment() error {
 func (db *Db) handleWriteLoop() {
 	for db.open {
 		data := <-db.dataChan
-		l := db.index.l
-		l.Lock()
 		err := db.put(data.entry)
-		l.Unlock()
 		data.res <- err
 	}
 }
