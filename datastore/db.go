@@ -252,9 +252,7 @@ func (db *Db) mergeOldSegments() error {
 	db.segments = append(shadowDb.segments, db.curSegment())
 
 	for _, segment := range segmentsToMerge {
-		segment.mu.Lock()
 		os.Remove(segment.FilePath())
-		segment.mu.Unlock()
 	}
 
 	return nil
