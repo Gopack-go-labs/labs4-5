@@ -25,7 +25,7 @@ type Db struct {
 	dataChan chan PutRequest
 	open     bool
 
-	merge sync.Mutex
+	merge sync.RWMutex
 }
 
 type PutRequest struct {
@@ -128,6 +128,9 @@ func (db *Db) Close() error {
 }
 
 func (db *Db) getUnknown(key string) (val interface{}, err error) {
+	db.merge.RLock()
+	defer db.merge.RUnlock()
+
 	for i := len(db.segments) - 1; i >= 0; i-- {
 		seg := db.segments[i]
 		val, err := seg.Get(key)
@@ -294,9 +297,9 @@ func (db *Db) getNextSegmentPath() string {
 func (db *Db) handleWriteLoop() {
 	for db.open {
 		data := <-db.dataChan
-		db.merge.Lock()
+		db.merge.RLock()
 		err := db.putHandler(data.entry)
-		db.merge.Unlock()
+		db.merge.RUnlock()
 
 		data.res <- err
 	}
