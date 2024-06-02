@@ -170,6 +170,44 @@ func TestDb_Segments(t *testing.T) {
 		assert.Equal(t, "value3", val, "Bad value returned expected value3, got %s", val)
 	})
 
+	t.Run("mix of vals", func(t *testing.T) {
+		err := db.PutInt64("key5", 123)
+		assert.Nil(t, err)
+		err = db.PutString("key6", "123")
+		assert.Nil(t, err)
+
+		intVal, err := db.GetInt64("key5")
+		assert.Nil(t, err)
+
+		strVal, err := db.GetString("key6")
+		assert.Nil(t, err)
+
+		_, err = db.GetString("key5")
+		assert.Error(t, err)
+		_, err = db.GetInt64("key6")
+		assert.Error(t, err)
+
+		assert.Equal(t, int64(123), intVal)
+		assert.Equal(t, "123", strVal)
+	})
+
+	t.Run("new db process with mix of vals", func(t *testing.T) {
+		if err := db.Close(); err != nil {
+			t.Fatal(err)
+		}
+		db, err = NewDb(dbDir, limit)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		intVal, err := db.GetInt64("key5")
+		assert.Nil(t, err)
+		strVal, err := db.GetString("key6")
+		assert.Nil(t, err)
+		assert.Equal(t, int64(123), intVal)
+		assert.Equal(t, "123", strVal)
+	})
+
 	t.Run("over limit", func(t *testing.T) {
 		err := db.PutString("key5", string(make([]byte, limit+1)))
 		assert.Error(t, err, "Expected error, got nil")

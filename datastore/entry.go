@@ -49,6 +49,9 @@ func (e *entry) Encode() []byte {
 }
 
 func (e *entry) Size() MemoryUnit {
+	if e.valueType == Int {
+		return MemoryUnit((len(e.key) + 13 + 8) * 8)
+	}
 	bytes := len(e.key) + len(e.value.(string)) + 13
 	return MemoryUnit(bytes * 8)
 }
