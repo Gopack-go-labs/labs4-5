@@ -194,7 +194,7 @@ func (db *Db) mergeOldSegments() error {
 			}
 
 			e := pair.entry
-			vals[e.key] = e.value
+			vals[e.key] = e.value.(string)
 		}
 	}
 

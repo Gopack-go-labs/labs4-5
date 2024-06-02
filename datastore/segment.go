@@ -63,7 +63,7 @@ func (s *Segment) Get(key string) (string, error) {
 		return "", err
 	}
 
-	return value, nil
+	return value.(string), nil
 }
 
 func (s *Segment) Has(key string) bool {
