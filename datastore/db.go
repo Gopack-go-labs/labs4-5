@@ -89,7 +89,7 @@ func (db *Db) recoverSegment(id int, path string) (*Segment, error) {
 	segment := &Segment{
 		offset: 0,
 		file:   input,
-		index:  ConcurrentMapInit[string, *Record](),
+		index:  ConcurrentMapInit[string, int64](),
 		id:     id,
 	}
 
@@ -98,10 +98,7 @@ func (db *Db) recoverSegment(id int, path string) (*Segment, error) {
 			return nil, pair.err
 		}
 		e := pair.entry
-		segment.index.SetUnsafe(e.key, &Record{
-			position: segment.offset,
-			segment:  segment,
-		})
+		segment.index.SetUnsafe(e.key, segment.offset)
 		segment.offset += e.Size().Bytes()
 	}
 
@@ -114,13 +111,12 @@ func (db *Db) Close() error {
 }
 
 func (db *Db) Get(key string) (val string, err error) {
-	for i := len(db.segments) - 1; i >= 0; i++ {
+	for i := len(db.segments) - 1; i >= 0; i-- {
 		seg := db.segments[i]
-		record, ok := seg.index.Get(key)
-		if !ok {
+		val, err := seg.Get(key)
+		if err != nil {
 			continue
 		}
-		val, err = record.Get() // This is thread-safe as the record is immutable
 		return val, err
 	}
 
@@ -153,11 +149,7 @@ func (db *Db) put(e *entry) error {
 		}
 	}
 
-	record, err := db.curSegment.Write(e)
-
-	if err == nil {
-		db.curSegment.index.SetUnsafe(e.key, record)
-	}
+	err := db.curSegment.Write(e)
 	return err
 }
 
@@ -240,7 +232,7 @@ func (db *Db) initNewSegment() error {
 	newSegment := &Segment{
 		offset: 0,
 		file:   outFile,
-		index:  ConcurrentMapInit[string, *Record](),
+		index:  ConcurrentMapInit[string, int64](),
 		id:     newSegmentId,
 	}
 	db.segments = append(db.segments, newSegment)
