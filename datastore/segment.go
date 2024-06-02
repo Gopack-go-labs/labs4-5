@@ -37,7 +37,7 @@ func (s *Segment) Write(p *entry) error {
 	return nil
 }
 
-func (s *Segment) Get(key string) (string, error) {
+func (s *Segment) Get(key string) (interface{}, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -63,7 +63,7 @@ func (s *Segment) Get(key string) (string, error) {
 		return "", err
 	}
 
-	return value.(string), nil
+	return value, nil
 }
 
 func (s *Segment) Has(key string) bool {

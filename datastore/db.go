@@ -127,7 +127,7 @@ func (db *Db) Close() error {
 	return db.curSegment().Close()
 }
 
-func (db *Db) Get(key string) (val string, err error) {
+func (db *Db) getUnknown(key string) (val interface{}, err error) {
 	for i := len(db.segments) - 1; i >= 0; i-- {
 		seg := db.segments[i]
 		val, err := seg.Get(key)
@@ -140,21 +140,50 @@ func (db *Db) Get(key string) (val string, err error) {
 	return "", ErrNotFound
 }
 
-func (db *Db) Put(key, value string) error {
+func (db *Db) putUnknown(entry *entry) error {
 	res := make(chan error)
 	db.dataChan <- PutRequest{
-		entry: &entry{
-			key:   key,
-			value: value,
-		},
-		res: res,
+		entry: entry,
+		res:   res,
 	}
 	err := <-res
 	close(res)
 	return err
 }
 
-func (db *Db) put(e *entry) error {
+func (db *Db) PutString(key, value string) error {
+	return db.putUnknown(&entry{key, value, Str})
+}
+
+func (db *Db) PutInt64(key string, value int64) error {
+	return db.putUnknown(&entry{key, value, Int})
+}
+
+func (db *Db) GetString(key string) (string, error) {
+	val, err := db.getUnknown(key)
+	if err != nil {
+		return "", err
+	}
+	str, ok := val.(string)
+	if !ok {
+		return "", fmt.Errorf("value is not a string")
+	}
+	return str, nil
+}
+
+func (db *Db) GetInt64(key string) (int64, error) {
+	val, err := db.getUnknown(key)
+	if err != nil {
+		return 0, err
+	}
+	i, ok := val.(int64)
+	if !ok {
+		return 0, fmt.Errorf("value is not an int64")
+	}
+	return i, nil
+}
+
+func (db *Db) putHandler(e *entry) error {
 	entrySize := e.Size()
 	if db.maxSegmentSize < entrySize {
 		return fmt.Errorf("entry size exceeds segment size")
@@ -181,7 +210,7 @@ func (db *Db) mergeOldSegments() error {
 	}
 
 	var err error
-	vals := make(map[string]string)
+	vals := make(map[string]*entry)
 	for i := 0; i < len(segmentsToMerge); i++ {
 		seg := segmentsToMerge[i]
 		for pair := range segmentValsGenerator(seg) {
@@ -194,7 +223,7 @@ func (db *Db) mergeOldSegments() error {
 			}
 
 			e := pair.entry
-			vals[e.key] = e.value.(string)
+			vals[e.key] = e
 		}
 	}
 
@@ -205,8 +234,8 @@ func (db *Db) mergeOldSegments() error {
 	defer os.RemoveAll(shadowDb.outDir)
 	defer shadowDb.Close()
 
-	for key, value := range vals {
-		err = shadowDb.Put(key, value)
+	for _, e := range vals {
+		err = shadowDb.putUnknown(e)
 		if err != nil {
 			return err
 		}
@@ -266,7 +295,7 @@ func (db *Db) handleWriteLoop() {
 	for db.open {
 		data := <-db.dataChan
 		db.merge.Lock()
-		err := db.put(data.entry)
+		err := db.putHandler(data.entry)
 		db.merge.Unlock()
 
 		data.res <- err
