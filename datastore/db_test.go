@@ -1,6 +1,7 @@
 package datastore
 
 import (
+	"github.com/stretchr/testify/assert"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -199,9 +200,11 @@ func TestDb_Segments(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if len(db.segments) != 2 { // The size after merge is not enough to remvoe the segment
+		if len(db.segments) != 2 {
 			t.Errorf("Expected number of segments %d got %d", 2, len(db.segments))
 		}
+
+		assert.Equal(t, 3, db.lastSegmentId)
 
 		for _, pair := range newPairs {
 			value, err := db.Get(pair[0])
