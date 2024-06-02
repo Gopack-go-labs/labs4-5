@@ -92,7 +92,6 @@ func TestDb_Put(t *testing.T) {
 
 }
 
-// TODO: use testify for assertions
 func TestDb_Segments(t *testing.T) {
 	dbDir := filepath.Join(os.TempDir(), "test-db")
 	limit := 22 * 3 * Byte
@@ -118,43 +117,28 @@ func TestDb_Segments(t *testing.T) {
 	t.Run("segmentation", func(t *testing.T) {
 		for _, pair := range pairs {
 			err := db.Put(pair[0], pair[1])
-			if err != nil {
-				t.Errorf("Cannot put %s: %s", pair, err)
-			}
+			assert.Nil(t, err, "Cannot put %s: %s", pair, err)
 		}
-		if len(db.segments) != 1 {
-			t.Errorf("Expected number of segments %d got %d", 1, len(db.segments))
-		}
+
+		assert.Equal(t, 1, len(db.segments), "Expected number of segments %d got %d", 1, len(db.segments))
 	})
 
 	t.Run("new segment", func(t *testing.T) {
 		for _, pair := range newPairs {
 			err := db.Put(pair[0], pair[1])
-			if err != nil {
-				t.Errorf("Cannot put %s: %s", pair, err)
-			}
+			assert.Nil(t, err, "Cannot put %s: %s", pair, err)
 		}
-		if len(db.segments) != 3 {
-			t.Errorf("Expected number of segments %d got %d", 3, len(db.segments))
-		}
+		assert.Equal(t, 3, len(db.segments), "Expected number of segments %d got %d", 3, len(db.segments))
 
 		for _, pair := range newPairs {
 			value, err := db.Get(pair[0])
-			if err != nil {
-				t.Errorf("Cannot get %s: %s", pair, err)
-			}
-			if value != pair[1] {
-				t.Errorf("Bad value returned expected %s, got %s", pair[1], value)
-			}
+			assert.Nil(t, err, "Cannot get %s: %s", pair, err)
+			assert.Equal(t, pair[1], value, "Bad value returned expected %s, got %s", pair[1], value)
 		}
 
 		val, err := db.Get("key3")
-		if err != nil {
-			t.Errorf("Cannot get key3: %s", err)
-		}
-		if val != "value3" {
-			t.Errorf("Bad value returned expected value3, got %s", val)
-		}
+		assert.Nil(t, err, "Cannot get key3: %s", err)
+		assert.Equal(t, "value3", val, "Bad value returned expected value3, got %s", val)
 	})
 
 	t.Run("new db process", func(t *testing.T) {
@@ -166,29 +150,19 @@ func TestDb_Segments(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if len(db.segments) != 3 {
-			t.Errorf("Expected number of segments %d got %d", 3, len(db.segments))
-		}
+		assert.Equal(t, 3, len(db.segments), "Expected number of segments %d got %d", 3, len(db.segments))
 
 		for _, pair := range newPairs {
 			value, err := db.Get(pair[0])
-			if err != nil {
-				t.Errorf("Cannot get %s: %s", pair, err)
-			}
-			if value != pair[1] {
-				t.Errorf("Bad value returned expected %s, got %s", pair[1], value)
-			}
+			assert.Nil(t, err, "Cannot get %s: %s", pair, err)
+			assert.Equal(t, pair[1], value, "Bad value returned expected %s, got %s", pair[1], value)
 		}
 	})
 
 	t.Run("merge segments", func(t *testing.T) {
 		err := db.mergeOldSegments()
-		if err != nil {
-			t.Errorf("Cannot merge segments: %s", err)
-		}
-		if len(db.segments) != 2 {
-			t.Errorf("Expected number of segments %d got %d", 2, len(db.segments))
-		}
+		assert.Nil(t, err, "Cannot merge segments: %s", err)
+		assert.Equal(t, 2, len(db.segments), "Expected number of segments %d got %d", 2, len(db.segments))
 	})
 
 	t.Run("new db process after merge", func(t *testing.T) {
@@ -200,35 +174,22 @@ func TestDb_Segments(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if len(db.segments) != 2 {
-			t.Errorf("Expected number of segments %d got %d", 2, len(db.segments))
-		}
-
+		assert.Equal(t, 2, len(db.segments), "Expected number of segments %d got %d", 2, len(db.segments))
 		assert.Equal(t, 3, db.lastSegmentId)
 
 		for _, pair := range newPairs {
 			value, err := db.Get(pair[0])
-			if err != nil {
-				t.Errorf("Cannot get %s: %s", pair, err)
-			}
-			if value != pair[1] {
-				t.Errorf("Bad value returned expected %s, got %s", pair[1], value)
-			}
+			assert.Nil(t, err, "Cannot get %s: %s", pair, err)
+			assert.Equal(t, pair[1], value, "Bad value returned expected %s, got %s", pair[1], value)
 		}
 
 		val, err := db.Get("key3")
-		if err != nil {
-			t.Errorf("Cannot get key3: %s", err)
-		}
-		if val != "value3" {
-			t.Errorf("Bad value returned expected value3, got %s", val)
-		}
+		assert.Nil(t, err, "Cannot get key3: %s", err)
+		assert.Equal(t, "value3", val, "Bad value returned expected value3, got %s", val)
 	})
 
 	t.Run("over limit", func(t *testing.T) {
 		err := db.Put("key5", string(make([]byte, limit+1)))
-		if err == nil {
-			t.Errorf("Expected error, got nil")
-		}
+		assert.Error(t, err, "Expected error, got nil")
 	})
 }
