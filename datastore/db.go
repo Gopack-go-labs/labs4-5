@@ -16,7 +16,7 @@ type Db struct {
 	outDir         string
 
 	index                 *ConcurrentMap[string, *Record]
-	segments              map[int]*Segment
+	segments              []*Segment
 	curSegment            *Segment
 	segmentMergeThreshold int
 
@@ -37,7 +37,7 @@ func NewDb(dir string, size MemoryUnit) (*Db, error) {
 	db := &Db{
 		outDir:                dir,
 		index:                 ConcurrentMapInit[string, *Record](),
-		segments:              make(map[int]*Segment),
+		segments:              make([]*Segment, 0),
 		maxSegmentSize:        size,
 		dataChan:              make(chan PutRequest),
 		open:                  true,
@@ -65,13 +65,15 @@ func (db *Db) recover() (*Db, error) {
 		return files[i] < files[j]
 	})
 	for i, file := range files {
-		err = db.recoverSegment(i, file)
-		db.curSegment = db.segments[i]
+		seg, err := db.recoverSegment(i, file)
 		if err != nil && err != io.EOF {
 			return nil, err
 		}
 
-		if isLastSegment := i == len(files)-1; !isLastSegment {
+		db.segments = append(db.segments, seg)
+		if isLastSegment := i == len(files)-1; isLastSegment {
+			db.curSegment = seg
+		} else {
 			err := db.segments[i].Close()
 			if err != nil {
 				return nil, err
@@ -82,21 +84,20 @@ func (db *Db) recover() (*Db, error) {
 	return db, nil
 }
 
-func (db *Db) recoverSegment(id int, path string) error {
+func (db *Db) recoverSegment(id int, path string) (*Segment, error) {
 	input, err := os.Open(path)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	segment := &Segment{
 		offset: 0,
 		file:   input,
 		id:     id,
 	}
-	db.segments[id] = segment
 
 	for pair := range segmentValsGenerator(segment) {
 		if pair.err != nil {
-			return pair.err
+			return nil, pair.err
 		}
 		e := pair.entry
 		db.index.SetUnsafe(e.key, &Record{
@@ -106,7 +107,7 @@ func (db *Db) recoverSegment(id int, path string) error {
 		segment.offset += e.Size().Bytes()
 	}
 
-	return err
+	return segment, nil
 }
 
 func (db *Db) Close() error {
@@ -207,7 +208,7 @@ func (db *Db) mergeOldSegments() error {
 	for _, segment := range segments {
 		toRemove := db.segments[segment.id]
 		os.Remove(toRemove.file.Name())
-		delete(db.segments, segment.id)
+		//delete(db.segments, segment.id)
 	}
 
 	for _, segment := range shadowDb.segments {
@@ -239,7 +240,7 @@ func (db *Db) initNewSegment() error {
 		file:   outFile,
 		id:     newSegmentId,
 	}
-	db.segments[newSegmentId] = newSegment
+	db.segments = append(db.segments, newSegment)
 	db.curSegment = newSegment
 
 	if len(db.segments) > db.segmentMergeThreshold {
