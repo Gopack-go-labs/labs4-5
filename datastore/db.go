@@ -25,7 +25,8 @@ type Db struct {
 	dataChan chan PutRequest
 	open     bool
 
-	merge sync.RWMutex
+	mergeWrite sync.RWMutex
+	mergeRead  sync.RWMutex
 }
 
 type PutRequest struct {
@@ -128,8 +129,8 @@ func (db *Db) Close() error {
 }
 
 func (db *Db) getUnknown(key string) (val interface{}, err error) {
-	db.merge.RLock()
-	defer db.merge.RUnlock()
+	db.mergeRead.RLock()
+	defer db.mergeRead.RUnlock()
 
 	for i := len(db.segments) - 1; i >= 0; i-- {
 		seg := db.segments[i]
@@ -203,8 +204,8 @@ func (db *Db) putHandler(e *entry) error {
 }
 
 func (db *Db) mergeOldSegments() error {
-	db.merge.Lock()
-	defer db.merge.Unlock()
+	db.mergeWrite.Lock()
+	defer db.mergeWrite.Unlock()
 
 	segmentsToMerge := make([]*Segment, 0, len(db.segments))
 	for i := 0; i < len(db.segments)-1; i++ {
@@ -252,12 +253,12 @@ func (db *Db) mergeOldSegments() error {
 		db.lastSegmentId++
 	}
 
+	db.mergeRead.Lock()
 	db.segments = append(shadowDb.segments, db.curSegment())
+	db.mergeRead.Unlock()
 
 	for _, segment := range segmentsToMerge {
-		segment.mu.Lock()
 		os.Remove(segment.FilePath())
-		segment.mu.Unlock()
 	}
 
 	return nil
@@ -299,9 +300,9 @@ func (db *Db) getNextSegmentPath() string {
 func (db *Db) handleWriteLoop() {
 	for db.open {
 		data := <-db.dataChan
-		db.merge.RLock()
+		db.mergeWrite.RLock()
 		err := db.putHandler(data.entry)
-		db.merge.RUnlock()
+		db.mergeWrite.RUnlock()
 
 		data.res <- err
 	}
