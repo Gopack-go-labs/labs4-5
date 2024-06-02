@@ -6,20 +6,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 )
-
-type Record struct {
-	position int64
-	segment  *Segment
-}
-
-func (r *Record) Get() (string, error) {
-	return r.segment.Get(r)
-}
 
 type Segment struct {
 	offset int64
 	file   *os.File
+	index  map[string]int64
+	mu     sync.RWMutex
 	id     int
 }
 
@@ -27,27 +21,38 @@ func (s *Segment) Close() error {
 	return s.file.Close()
 }
 
-func (s *Segment) Write(p *entry) (*Record, error) {
+func (s *Segment) Write(p *entry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	n, err := s.file.Write(p.Encode())
 	if err != nil {
-		return nil, err
+		return err
 	}
-	record := &Record{
-		segment:  s,
-		position: s.offset,
-	}
+	pos := s.offset
 	s.offset += int64(n)
-	return record, nil
+
+	s.SetIndex(p.key, pos)
+
+	return nil
 }
 
-func (s *Segment) Get(record *Record) (string, error) {
+func (s *Segment) Get(key string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	file, err := os.Open(s.file.Name())
 	if err != nil {
 		return "", err
 	}
 	defer file.Close()
 
-	_, err = file.Seek(record.position, 0)
+	pos, ok := s.GetIndex(key)
+	if !ok {
+		return "", fmt.Errorf("can not get an element")
+	}
+
+	_, err = file.Seek(pos, 0)
 	if err != nil {
 		return "", err
 	}
@@ -61,12 +66,26 @@ func (s *Segment) Get(record *Record) (string, error) {
 	return value, nil
 }
 
+func (s *Segment) Has(key string) bool {
+	_, err := s.Get(key)
+	return err == nil
+}
+
 func (s *Segment) IsSurpassed(maxSize MemoryUnit) bool {
 	return s.offset > maxSize.Bytes()
 }
 
 func (s *Segment) FilePath() string {
 	return s.file.Name()
+}
+
+func (s *Segment) GetIndex(key string) (int64, bool) {
+	offset, ok := s.index[key]
+	return offset, ok
+}
+
+func (s *Segment) SetIndex(key string, val int64) {
+	s.index[key] = val
 }
 
 type generatorPair struct {
