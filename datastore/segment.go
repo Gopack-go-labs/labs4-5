@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 )
 
 type Segment struct {
 	offset int64
 	file   *os.File
-	index  *ConcurrentMap[string, int64]
+	index  map[string]int64
+	mu     sync.RWMutex
 	id     int
 }
 
@@ -20,6 +22,9 @@ func (s *Segment) Close() error {
 }
 
 func (s *Segment) Write(p *entry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	n, err := s.file.Write(p.Encode())
 	if err != nil {
 		return err
@@ -27,19 +32,22 @@ func (s *Segment) Write(p *entry) error {
 	pos := s.offset
 	s.offset += int64(n)
 
-	s.index.Set(p.key, pos)
+	s.SetIndex(p.key, pos)
 
 	return nil
 }
 
 func (s *Segment) Get(key string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	file, err := os.Open(s.file.Name())
 	if err != nil {
 		return "", err
 	}
 	defer file.Close()
 
-	pos, ok := s.index.Get(key)
+	pos, ok := s.GetIndex(key)
 	if !ok {
 		return "", fmt.Errorf("can not get an element")
 	}
@@ -69,6 +77,15 @@ func (s *Segment) IsSurpassed(maxSize MemoryUnit) bool {
 
 func (s *Segment) FilePath() string {
 	return s.file.Name()
+}
+
+func (s *Segment) GetIndex(key string) (int64, bool) {
+	offset, ok := s.index[key]
+	return offset, ok
+}
+
+func (s *Segment) SetIndex(key string, val int64) {
+	s.index[key] = val
 }
 
 type generatorPair struct {

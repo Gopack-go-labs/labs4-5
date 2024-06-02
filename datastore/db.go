@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"sync"
 )
 
 var ErrNotFound = fmt.Errorf("record does not exist")
@@ -23,6 +24,8 @@ type Db struct {
 
 	dataChan chan PutRequest
 	open     bool
+
+	merge sync.Mutex
 }
 
 type PutRequest struct {
@@ -102,10 +105,9 @@ func (db *Db) recoverSegment(path string) (*Segment, error) {
 		return nil, err
 	}
 	segment := &Segment{
-		offset: 0,
-		file:   input,
-		index:  ConcurrentMapInit[string, int64](),
-		id:     id,
+		file:  input,
+		index: make(map[string]int64),
+		id:    id,
 	}
 
 	for pair := range segmentValsGenerator(segment) {
@@ -113,7 +115,7 @@ func (db *Db) recoverSegment(path string) (*Segment, error) {
 			return nil, pair.err
 		}
 		e := pair.entry
-		segment.index.Set(e.key, segment.offset)
+		segment.SetIndex(e.key, segment.offset)
 		segment.offset += e.Size().Bytes()
 	}
 
@@ -169,6 +171,9 @@ func (db *Db) put(e *entry) error {
 }
 
 func (db *Db) mergeOldSegments() error {
+	db.merge.Lock()
+	defer db.merge.Unlock()
+
 	segmentsToMerge := make([]*Segment, 0, len(db.segments))
 	for i := 0; i < len(db.segments)-1; i++ {
 		seg := db.segments[i]
@@ -240,7 +245,7 @@ func (db *Db) initNewSegment() error {
 	newSegment := &Segment{
 		offset: 0,
 		file:   outFile,
-		index:  ConcurrentMapInit[string, int64](),
+		index:  make(map[string]int64),
 		id:     newSegmentId,
 	}
 	db.segments = append(db.segments, newSegment)
@@ -260,7 +265,10 @@ func (db *Db) getNextSegmentPath() string {
 func (db *Db) handleWriteLoop() {
 	for db.open {
 		data := <-db.dataChan
+		db.merge.Lock()
 		err := db.put(data.entry)
+		db.merge.Unlock()
+
 		data.res <- err
 	}
 }
