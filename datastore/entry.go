@@ -49,7 +49,7 @@ func (e *entry) Encode() []byte {
 }
 
 func (e *entry) Size() MemoryUnit {
-	bytes := len(e.key) + len(e.value.(string)) + 12
+	bytes := len(e.key) + len(e.value.(string)) + 13
 	return MemoryUnit(bytes * 8)
 }
 

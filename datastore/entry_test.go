@@ -24,6 +24,7 @@ func Test_EntryString(t *testing.T) {
 		assert.True(t, ok)
 		assert.Nil(t, err)
 		assert.Equal(t, "test-value", s)
+		assert.Equal(t, e.Size(), MemoryUnit((13+len("test-value")+len("key"))*8))
 	})
 }
 
