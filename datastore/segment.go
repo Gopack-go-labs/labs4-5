@@ -27,7 +27,7 @@ func (s *Segment) Write(p *entry) error {
 	pos := s.offset
 	s.offset += int64(n)
 
-	s.index.SetUnsafe(p.key, pos)
+	s.index.Set(p.key, pos)
 
 	return nil
 }

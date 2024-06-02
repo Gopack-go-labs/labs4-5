@@ -98,7 +98,7 @@ func (db *Db) recoverSegment(id int, path string) (*Segment, error) {
 			return nil, pair.err
 		}
 		e := pair.entry
-		segment.index.SetUnsafe(e.key, segment.offset)
+		segment.index.Set(e.key, segment.offset)
 		segment.offset += e.Size().Bytes()
 	}
 
