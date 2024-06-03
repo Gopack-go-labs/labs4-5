@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -49,15 +48,16 @@ func main() {
 		key := vars["key"]
 	
 		switch req.Method {
-			
 		case http.MethodGet:
 			var val string
 			var err error
+			dataType := "string"
 	
 			if params.Get("type") == "int64" {
 				var data int64
 				data, err = db.GetInt64(key)
 				val = strconv.FormatInt(data, 10)
+				dataType = "int64"
 			} else {
 				val, err = db.GetString(key)
 			}
@@ -67,9 +67,13 @@ func main() {
 				return
 			}
 			
-			rw.Header().Set("Content-Type", "application/json")
+			rw.Header().Set("content-type", "application/json")
 			rw.WriteHeader(http.StatusOK)
-			rw.Write([]byte(val))
+			_ = json.NewEncoder(rw).Encode(Res{
+				Key: key,
+				Value: val,
+				Type: dataType,
+			})
 
 		case http.MethodPost:
 			var body Req
@@ -85,10 +89,8 @@ func main() {
 
 			if err != nil {
 				err = db.PutString(key, body.Value)
-				fmt.Println("Post string")
 			} else {
 				err = db.PutInt64(key, val)
-				fmt.Println("Post int64")
 			}
 
 			if err != nil {
