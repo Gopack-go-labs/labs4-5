@@ -1,35 +1,50 @@
-version: '2.1'
+version: "2.1"
 
 networks:
-  servers:
+    servers:
 
 services:
+    balancer:
+        build: .
+        command: "lb"
+        depends_on:
+            - db
+        networks:
+            - servers
+        ports:
+            - "8090:8090"
 
-  balancer:
-    build: .
-    command: "lb"
-    networks:
-      - servers
-    ports:
-      - "8090:8090"
+    db:
+        build: .
+        command: "db"
+        networks:
+            - servers
+        ports:
+            - "8083:8080"
 
-  server1:
-    build: .
-    networks:
-      - servers
-    ports:
-      - "8080:8080"
+    server1:
+        build: .
+        depends_on:
+            - db
+        networks:
+            - servers
+        ports:
+            - "8080:8080"
 
-  server2:
-    build: .
-    networks:
-      - servers
-    ports:
-      - "8081:8080"
+    server2:
+        build: .
+        depends_on:
+            - db
+        networks:
+            - servers
+        ports:
+            - "8081:8080"
 
-  server3:
-    build: .
-    networks:
-      - servers
-    ports:
-      - "8082:8080"
+    server3:
+        build: .
+        depends_on:
+            - db
+        networks:
+            - servers
+        ports:
+            - "8082:8080"
